@@ -45,8 +45,8 @@ type Message struct {
 
 	Entries []Entry // Entries
 
-	Reject     bool // 拒绝或接受请求, 常用于回复消息
-	RejectHint int  // 拒绝并改正, 修正leaderId
+	Reject bool // 拒绝或接受请求, 常用于回复消息
+	//RejectHint int  // 消息提示
 
 	// VRaft
 	Size int // 单位是byte,表示整个message的大小
@@ -71,8 +71,8 @@ func (m *Message) clone() Message {
 		CommitIndex: m.CommitIndex,
 		Entries:     m.Entries[:],
 		Reject:      m.Reject,
-		RejectHint:  m.RejectHint,
-		Size:        m.Size,
+		//RejectHint:  m.RejectHint,
+		Size: m.Size,
 		//PreOrderedPeers: m.PreOrderedPeers[:],
 		//ForwardMessages: m.ForwardMessages[:],
 	}

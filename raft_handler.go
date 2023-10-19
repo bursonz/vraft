@@ -201,7 +201,7 @@ func (r *Raft) handleAppendEntriesReply(m Message) {
 			r.l.Infof("收到 AppendEntriesReply from %d Success: nextIndex := %v, matchIndex := %v; commitIndex := %d", m.From, r.nextIndex, r.matchIndex, r.commitIndex)
 
 			r.checkQuorumLogs() // 检查日志提交情况，若提交，则通知应用
-		} else {                // conflict 通过额外信息快速收敛 nextIndex
+		} else { // conflict 通过额外信息快速收敛 nextIndex
 			if m.LogTerm >= 0 { // logTerm 冲突
 				lastIndexOfTerm := -1
 				for i := len(r.log) - 1; i >= 0; i-- {
@@ -221,4 +221,18 @@ func (r *Raft) handleAppendEntriesReply(m Message) {
 			r.l.Infof("收到 AppendEntriesReply from %d Rejected: nextIndex := %d", m.From, r.nextIndex[m.From]-1)
 		}
 	}
+}
+
+func (r *Raft) handleBiasVote(m Message) {
+
+}
+
+func (r *Raft) handleBiasVoteReply(m Message) {
+
+}
+
+// Leader发送ForwardAppend 给 viceLeader
+// viceLeader将 暂存的AppendEntries消息头补足后转发给Follower
+func (r *Raft) handleForwardAppend(m Message) {
+
 }

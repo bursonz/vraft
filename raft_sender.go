@@ -29,7 +29,20 @@ func (r *Raft) broadcastAppendEntries() {
 		return
 	}
 	savedTerm := r.term
+	//viceLeadersNum := r.viceLeaders
+	//peersNum := len(r.peers)
+	//TODO VRaft
 	r.mu.Unlock()
+
+	//if r.vraft && (len(r.preOrderedPeers) != 0 || r.preOrderedPeers == nil) {
+	//	switch {
+	//	case
+	//	}
+	//	if r.viceLeaders == len(r.peers) {
+	//
+	//	}
+	//	return
+	//}
 
 	for _, peer := range r.peers {
 		go func(id int) {
@@ -62,4 +75,19 @@ func (r *Raft) broadcastAppendEntries() {
 			r.n.Send(m)
 		}(peer.id)
 	}
+}
+
+//func (r *Raft) sendBiasVote(id int) {
+//
+//}
+
+// 发送ForwardAppend给viceLeader, 附带消息头
+func (r *Raft) sendForwardAppend(id int, m ...Message) {
+	//
+}
+
+func (r *Raft) send(m Message) {
+	m.From = r.id
+	m.Size = 10 // TODO 统一处理Size
+	r.n.Send(m)
 }

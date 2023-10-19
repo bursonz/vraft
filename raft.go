@@ -57,6 +57,11 @@ type Raft struct {
 	id    int
 	peers map[int]Peer
 
+	// VRaft
+	vraft           bool
+	preOrderedPeers []int
+	viceLeaders     int // 个数
+
 	// Persistent raft state on all servers
 	term int // current term
 	vote int // last voted id
