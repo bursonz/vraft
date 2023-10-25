@@ -35,5 +35,5 @@ const (
 
 // ID
 const (
-	None int = 0 // 空节点id
+	None int = -1 // 空节点id
 )

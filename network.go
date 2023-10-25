@@ -78,22 +78,7 @@ func NewNetwork(nodes map[int]Peer, delay time.Duration) *Network {
 			}
 		}
 	}
-
 	return rn
-}
-
-// NewNodeNetwork 获得节点网络
-func (net *Network) NewNodeNetwork(id int) *NodeNetwork {
-	return &NodeNetwork{
-		net:             net,
-		id:              id,
-		connPool:        make(map[int]bool),       // 节点的连接池
-		bw:              net.bandwidth[id],        // 带宽
-		sendC:           make(chan Message, 1024), //发送队列
-		lastCountBytes:  0,                        // 从现在统计流量
-		lastCheckBWTime: time.Now(),               // 从现在计时
-		l:               NewDefaultLogger(fmt.Sprintf("[NNet-%d]", id)),
-	}
 }
 
 // send 模拟数据包在网络中的传输过程
@@ -186,8 +171,23 @@ type NodeNetwork struct {
 	mu sync.Mutex
 }
 
-func (nn *NodeNetwork) Run() {
+// NewNodeNetwork 获得节点网络
+func (net *Network) NewNodeNetwork(id int) *NodeNetwork {
+	return &NodeNetwork{
+		net:             net,
+		id:              id,
+		connPool:        make(map[int]bool),       // 节点的连接池
+		bw:              net.bandwidth[id],        // 带宽
+		sendC:           make(chan Message, 1024), //发送队列
+		doneC:           make(chan struct{}),
+		lastCountBytes:  0,          // 从现在统计流量
+		lastCheckBWTime: time.Now(), // 从现在计时
+		l:               NewDefaultLogger(fmt.Sprintf("[NNet-%d]", id)),
+	}
+}
 
+func (nn *NodeNetwork) Run() {
+	nn.l.Debugf("Run()")
 	go nn.runSendWorker()
 }
 

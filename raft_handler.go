@@ -41,8 +41,8 @@ func (r *Raft) handleRequestVote(m Message) {
 	r.persistToStorage() // 持久化
 
 	r.l.Debugf("发送RequestVoteResp: %+v [currentTerm=%d, votedFor=%d]", reply, r.term, r.vote)
-	r.mu.Unlock()
 	r.n.Send(reply) // 发送
+	r.mu.Unlock()
 
 }
 
@@ -79,6 +79,7 @@ func (r *Raft) handleRequestVoteReply(m Message) {
 }
 
 func (r *Raft) handleAppendEntries(m Message) {
+	//TODO: Check Log Append
 	r.mu.Lock()
 
 	r.l.Infof("AppendEntries: %+v", m)
@@ -180,6 +181,8 @@ func (r *Raft) handleAppendEntries(m Message) {
 }
 
 func (r *Raft) handleAppendEntriesReply(m Message) {
+	//TODO: Check Log Append Reply
+	// 为什么索引会异常？
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -196,12 +199,16 @@ func (r *Raft) handleAppendEntriesReply(m Message) {
 		return
 	case m.Term == r.term:
 		if !m.Reject { // 成功
-			r.nextIndex[m.From] = m.LogIndex // nextIndex[peer] == len(peer.log)
-			r.matchIndex[m.From] = m.LogIndex - 1
+			if m.LogIndex > len(r.log) {
+				r.nextIndex[m.From] = len(r.log)
+			} else {
+				r.nextIndex[m.From] = m.LogIndex // nextIndex[peer] == len(peer.log)
+			}
+			r.matchIndex[m.From] = r.nextIndex[m.From] - 1
 			r.l.Infof("收到 AppendEntriesReply from %d Success: nextIndex := %v, matchIndex := %v; commitIndex := %d", m.From, r.nextIndex, r.matchIndex, r.commitIndex)
 
 			r.checkQuorumLogs() // 检查日志提交情况，若提交，则通知应用
-		} else {                // conflict 通过额外信息快速收敛 nextIndex
+		} else { // conflict 通过额外信息快速收敛 nextIndex
 			if m.LogTerm >= 0 { // logTerm 冲突
 				lastIndexOfTerm := -1
 				for i := len(r.log) - 1; i >= 0; i-- {
@@ -221,4 +228,11 @@ func (r *Raft) handleAppendEntriesReply(m Message) {
 			r.l.Infof("收到 AppendEntriesReply from %d Rejected: nextIndex := %d", m.From, r.nextIndex[m.From]-1)
 		}
 	}
+}
+
+func (r *Raft) handleProposal(m Message) {
+	//TODO: 抽象Proposal步骤
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.log = append(r.log, m.Entries...)
 }

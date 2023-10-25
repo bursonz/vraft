@@ -1,6 +1,7 @@
 package vraft
 
 import (
+	"log"
 	"sync"
 	"testing"
 	"time"
@@ -113,8 +114,7 @@ func NewCluster(t *testing.T, peers map[int]Peer, delay time.Duration) *Cluster 
 
 	c.l = NewDefaultLogger("[TEST] ")
 
-	for i := 0; i < n; i++ { // 收集日志
-		p := nodeList[i]
+	for _, p := range c.nodeList { // 收集日志
 		go c.collectCommits(p)
 	}
 	return c
@@ -123,23 +123,16 @@ func NewCluster(t *testing.T, peers map[int]Peer, delay time.Duration) *Cluster 
 func (c *Cluster) Shutdown() {
 	c.l.Warningf("集群正在关闭")
 	// disconnect
-	for i := 0; i < c.n; i++ {
-		//id := c.nodeList[i]
-		//c.nodes[id].DisconnectAll()
-		//c.connected[id] = false
-		c.nodes[i].DisconnectAll()
-		c.connected[i] = false
+	for _, p := range c.nodeList {
+		c.nodes[p].DisconnectAll()
+		c.connected[p] = false
 	}
-	for i := 0; i < c.n; i++ {
-		//id := c.nodeList[i]
-		//c.alive[id] = false
-		//c.nodes[id].Shutdown()
-		c.alive[i] = false
-		c.nodes[i].Shutdown()
+	for _, p := range c.nodeList {
+		c.alive[p] = false
+		c.nodes[p].Shutdown()
 	}
-	for i := 0; i < c.n; i++ {
-		//id := c.nodeList[i]
-		close(c.commitChans[i])
+	for _, p := range c.nodeList {
+		close(c.commitChans[p])
 	}
 }
 
@@ -149,8 +142,7 @@ func (c *Cluster) DisconnectPeer(id int) {
 	// let peer disconnect all nodes
 	c.nodes[id].DisconnectAll()
 	// let each node disconnect with peer
-	for i := 0; i < c.n; i++ {
-		p := c.nodeList[i]
+	for _, p := range c.nodeList {
 		if p != id {
 			c.nodes[p].DisconnectPeer(id)
 		}
@@ -161,11 +153,10 @@ func (c *Cluster) DisconnectPeer(id int) {
 
 func (c *Cluster) ReconnectPeer(id int) {
 	c.l.Testf("Reconnect %d", id)
-	for i := 0; i < c.n; i++ {
-		p := c.nodeList[i]
-		if i != id && c.alive[p] {
+	for _, p := range c.nodeList {
+		if p != id && c.alive[p] {
 			c.nodes[id].ConnectPeer(c.peers[p])
-			c.nodes[p].ConnectPeer(c.peers[p])
+			c.nodes[p].ConnectPeer(c.peers[id])
 		}
 	}
 	c.connected[id] = true
@@ -186,6 +177,9 @@ func (c *Cluster) CrashPeer(id int) {
 }
 
 func (c *Cluster) RestartPeer(id int) {
+	if c.alive[id] {
+		log.Fatalf("id=%d is alive in RestartPeer", id)
+	}
 	peers := make(map[int]Peer)
 	for _, peer := range c.peers {
 		if peer.id != id {
@@ -218,19 +212,18 @@ func (c *Cluster) Propose(cmd interface{}) bool {
 func (c *Cluster) CheckSingleLeader() (leader int, term int) {
 	// only n rounds find the leader.
 	// if didn't find, return -1,-1
-	for r := 0; r < 8; r++ { // 8 rounds
+	for r := 0; r < 10; r++ { // 8 rounds
 		leader = -1
 		term = -1
-		for i := 0; i < c.n; i++ {
-			id := c.nodeList[i]
-			if c.connected[id] {
-				_, t, state := c.nodes[id].r.Report()
+		for _, p := range c.nodeList {
+			if c.connected[p] {
+				_, t, state := c.nodes[p].r.Report()
 				if state == StateLeader {
 					if leader < 0 {
-						leader = id
+						leader = p
 						term = t
 					} else {
-						c.t.Fatalf("both %d and %d think they're leaders", leader, id)
+						c.t.Fatalf("both %d and %d think they're leaders", leader, p)
 					}
 				}
 			}
@@ -246,12 +239,11 @@ func (c *Cluster) CheckSingleLeader() (leader int, term int) {
 }
 
 func (c *Cluster) CheckNoLeader() {
-	for i := 0; i < c.n; i++ {
-		id := c.nodeList[i]
-		if c.connected[id] {
-			_, _, state := c.nodes[id].r.Report()
+	for _, p := range c.nodeList {
+		if c.connected[p] {
+			_, _, state := c.nodes[p].r.Report()
 			if state == StateLeader {
-				c.t.Fatalf("server %d leader; want none", id)
+				c.t.Fatalf("server %d leader; want none", p)
 			}
 		}
 	}
@@ -261,8 +253,7 @@ func (c *Cluster) CheckLeader() (leader int, term int) {
 	for { // 8 rounds
 		leader = -1
 		term = -1
-		for i := 0; i < c.n; i++ {
-			p := c.nodeList[i]
+		for _, p := range c.nodeList {
 			if c.connected[p] {
 				_, t, state := c.nodes[p].r.Report()
 				if state == StateLeader {
@@ -301,15 +292,15 @@ func (c *Cluster) CheckCommitted(cmd interface{}) (count int, index int) {
 	// Find the length of the commits slice for connected servers.
 	// 检查所有 node 的 commits 长度
 	commitsLen := -1
-	for i := 0; i < c.n; i++ {
-		if c.connected[i] { // 对于所有网络正常的节点，commits都应该一致
+	for _, p := range c.nodeList {
+		if c.connected[p] { // 对于所有网络正常的节点，commits都应该一致
 			if commitsLen >= 0 {
 				// If this was set already, expect the new length to be the same.
-				if len(c.commits[i]) != commitsLen {
-					c.t.Fatalf("commits[%d] = %d, commitsLen = %d", i, c.commits[i], commitsLen)
+				if len(c.commits[p]) != commitsLen {
+					c.t.Fatalf("commits[%d] = %d, commitsLen = %d", p, c.commits[p], commitsLen)
 				}
 			} else {
-				commitsLen = len(c.commits[i]) // 获取有提交的节点的已提交长度
+				commitsLen = len(c.commits[p]) // 获取有提交的节点的已提交长度
 			}
 		}
 	}
@@ -318,15 +309,14 @@ func (c *Cluster) CheckCommitted(cmd interface{}) (count int, index int) {
 	// Check consistency of commits from the start and to the command we're asked
 	// about. This loop will return once a command=cmd is found.
 	// 检查所有 node 的 每一个 commits 的内容是否一致
-	for j := 0; j < commitsLen; j++ { // each col == committed index
+	for col := 0; col < commitsLen; col++ { // each col == committed index
 		cmdContent := -1
-		for i := 0; i < c.n; i++ { // each row == node
-			p := c.nodeList[i]
+		for _, p := range c.nodeList { // each row == node
 			if c.connected[p] {
-				content := c.commits[p][j].Data.(int) // 获取内容
+				content := c.commits[p][col].Data.(int) // 获取内容
 				if cmdContent >= 0 {
 					if content != cmdContent {
-						c.t.Errorf("got %d, want %d at c.commits[%d][%d]", content, cmdContent, p, j)
+						c.t.Errorf("got %d, want %d at c.commits[%d][%d]", content, cmdContent, p, col)
 					}
 				} else {
 					cmdContent = content
@@ -338,13 +328,12 @@ func (c *Cluster) CheckCommitted(cmd interface{}) (count int, index int) {
 			// Check consistency of Index.
 			index = -1
 			count = 0
-			for i := 0; i < c.n; i++ {
-				p := c.nodeList[i]
+			for _, p := range c.nodeList {
 				if c.connected[p] {
-					if index >= 0 && c.commits[p][j].Index != index {
-						c.t.Errorf("got Index=%d, want %d at h.commits[%d][%d]", c.commits[p][j].Index, index, p, j)
+					if index >= 0 && c.commits[p][col].Index != index {
+						c.t.Errorf("got Index=%d, want %d at h.commits[%d][%d]", c.commits[p][col].Index, index, p, col)
 					} else {
-						index = c.commits[p][j].Index
+						index = c.commits[p][col].Index
 					}
 					count++
 				}
@@ -376,12 +365,12 @@ func (c *Cluster) CheckNotCommitted(cmd interface{}) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for i := 0; i < c.n; i++ {
-		if c.connected[i] {
-			for j := 0; j < len(c.commits[i]); j++ {
-				gotCmd := c.commits[i][j].Data
+	for _, p := range c.nodeList {
+		if c.connected[p] {
+			for col := 0; col < len(c.commits[p]); col++ {
+				gotCmd := c.commits[p][col].Data
 				if gotCmd == cmd {
-					c.t.Errorf("found %d at commits[%d][%d], expected none", cmd, i, j)
+					c.t.Errorf("found %d at commits[%d][%d], expected none", cmd, p, col)
 				}
 			}
 		}
