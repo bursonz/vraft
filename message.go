@@ -1,5 +1,11 @@
 package vraft
 
+import (
+	"bytes"
+	"encoding/gob"
+	"log"
+)
+
 type MessageType int
 
 const (
@@ -77,6 +83,31 @@ func (m *Message) clone() Message {
 		//ForwardMessages: m.ForwardMessages[:],
 	}
 	return newMsg
+}
+
+// ToBytes 将 Message 转化为二进制流
+func (m *Message) ToBytes() []byte {
+	buf := bytes.Buffer{}
+	encoder := gob.NewEncoder(&buf)
+	err := encoder.Encode(m)
+	if err != nil {
+		log.Fatalf("ERROR: %v", err)
+		return nil
+	}
+
+	//fmt.Print(buf.Bytes())
+	return buf.Bytes()
+}
+
+func (m *Message) FromBytes(b []byte) {
+	buf := bytes.NewBuffer(b)
+	decoder := gob.NewDecoder(buf)
+	err := decoder.Decode(m)
+	if err != nil {
+		log.Fatalf("ERROR: %v", err)
+	}
+	//fmt.Print(m)
+
 }
 
 //type HardState struct {

@@ -17,9 +17,27 @@ type Peer struct {
 	ROM float64
 	// Reliability Assessment 可靠性
 	FR   float64 // Failure Rate - lower is better
-	MTBF float64 // Mean Time Between Failure - higher is better
-	MTTR float64 // Mean Time Between Repair - lower is better
-	MTTF float64 // Mean Time To Failure - higher is better
+	MTBF float64 // 平均故障间隔时间 Mean Time Between Failure - higher is better
+	// MTBF = MTTF + MTTR
+	MTTR float64 // 平均恢复前时间 Mean Time Between Repair - lower is better
+	MTTF float64 // 平均失效前时间 Mean Time To Failure - higher is better
+}
+
+// getMetrics 返回一个 []float64 {
+// 带宽,延迟,CPU,RAM,ROM,FR,平均故障间隔MTBF,平均MTTR,MTTF
+// }
+func (p *Peer) getMetrics() []float64 {
+	return []float64{
+		p.bandwidth.MBps(),
+		p.AvgLatency,
+		p.CPU,
+		p.RAM,
+		p.ROM,
+		//p.FR,
+		//p.MTBF,
+		p.MTTR,
+		p.MTTF,
+	}
 }
 
 type NodeInterface interface {
@@ -115,9 +133,9 @@ func (n *Node) Run() {
 
 func (n *Node) Shutdown() {
 	n.l.Warningf("节点正在关闭")
+	n.net.Stop()
 	n.r.Stop()
 	close(n.quitC)
-	n.net.Stop()
 	n.wg.Wait()
 }
 
@@ -139,8 +157,8 @@ func (n *Node) DisconnectPeer(id int) {
 	defer n.mu.Unlock()
 
 	// 1. 检查node中的信息
-	delete(n.peers, id) // 直接删除peer信息即可
-	delete(n.r.peers, id)
+	//delete(n.peers, id) // 直接删除peer信息即可
+	//delete(n.r.peers, id)
 
 	// 2. 检查node网络中的信息
 	n.net.Disconnect(id)
@@ -151,8 +169,8 @@ func (n *Node) DisconnectAll() {
 	defer n.mu.Unlock()
 
 	// 1. 检查node中的信息
-	n.peers = make(map[int]Peer) // 重置节点信息
-	n.r.peers = make(map[int]Peer)
+	//n.peers = make(map[int]Peer) // 重置节点信息
+	//n.r.peers = make(map[int]Peer)
 	// 2. 检查node网络中的信息
 	n.net.ResetConnPool() // 重置连接池
 
@@ -168,7 +186,7 @@ func (n *Node) Send(m Message) {
 	//	}
 	//}
 	// TODO 同步？
-	go n.net.Send(m) // 直接发送，将本地消息处理放在nodeNet上，直接转发给本机
+	n.net.Send(m) // 直接发送，将本地消息处理放在nodeNet上，直接转发给本机
 }
 
 // CheckBandWidth 检测带宽

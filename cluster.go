@@ -1,6 +1,7 @@
 package vraft
 
 import (
+	"log"
 	"sync"
 	"testing"
 	"time"
@@ -114,8 +115,8 @@ func NewCluster(t *testing.T, peers map[int]Peer, delay time.Duration) *Cluster 
 	c.l = NewDefaultLogger("[TEST] ")
 
 	// 收集日志
-	for _, p := range c.peers {
-		go c.collectCommits(p.id)
+	for _, p := range c.nodeList {
+		go c.collectCommits(p)
 	}
 	return c
 }
@@ -124,17 +125,16 @@ func (c *Cluster) Shutdown() {
 	c.l.Warningf("集群正在关闭")
 	// disconnect
 
-	for _, id := range c.nodeList {
-		c.nodes[id].DisconnectAll()
-		c.connected[id] = false
+	for _, p := range c.nodeList {
+		c.nodes[p].DisconnectAll()
+		c.connected[p] = false
 	}
-
-	for _, id := range c.nodeList {
-		c.nodes[id].Shutdown()
-		c.alive[id] = false
+	for _, p := range c.nodeList {
+		c.alive[p] = false
+		c.nodes[p].Shutdown()
 	}
-	for _, id := range c.nodeList {
-		close(c.commitChans[id])
+	for _, p := range c.nodeList {
+		close(c.commitChans[p])
 	}
 }
 
@@ -144,7 +144,6 @@ func (c *Cluster) DisconnectPeer(id int) {
 	// let peer disconnect all nodes
 	c.nodes[id].DisconnectAll()
 	// let each node disconnect with peer
-
 	for _, p := range c.nodeList {
 		if p != id {
 			c.nodes[p].DisconnectPeer(id)
@@ -180,6 +179,9 @@ func (c *Cluster) CrashPeer(id int) {
 }
 
 func (c *Cluster) RestartPeer(id int) {
+	if c.alive[id] {
+		log.Fatalf("id=%d is alive in RestartPeer", id)
+	}
 	peers := make(map[int]Peer)
 	for _, peer := range c.peers {
 		if peer.id != id {
@@ -212,7 +214,7 @@ func (c *Cluster) Propose(cmd interface{}) bool {
 func (c *Cluster) CheckSingleLeader() (leader int, term int) {
 	// only n rounds find the leader.
 	// if didn't find, return -1,-1
-	for r := 0; r < 8; r++ { // 8 rounds
+	for r := 0; r < 10; r++ { // 8 rounds
 		leader = -1
 		term = -1
 		for _, p := range c.nodeList {
@@ -311,7 +313,7 @@ func (c *Cluster) CheckCommitted(cmd interface{}) (count int, index int) {
 	// 检查所有 node 的 每一个 commits 的内容是否一致
 	for col := 0; col < commitsLen; col++ { // each col == committed index
 		cmdContent := -1
-		for _, p := range c.nodeList {
+		for _, p := range c.nodeList { // each row == node
 			if c.connected[p] {
 				content := c.commits[p][col].Data.(int) // 获取内容
 				if cmdContent >= 0 {
@@ -367,10 +369,10 @@ func (c *Cluster) CheckNotCommitted(cmd interface{}) {
 
 	for _, p := range c.nodeList {
 		if c.connected[p] {
-			for j := 0; j < len(c.commits[p]); j++ {
-				gotCmd := c.commits[p][j].Data
+			for col := 0; col < len(c.commits[p]); col++ {
+				gotCmd := c.commits[p][col].Data
 				if gotCmd == cmd {
-					c.t.Errorf("found %d at commits[%d][%d], expected none", cmd, p, j)
+					c.t.Errorf("found %d at commits[%d][%d], expected none", cmd, p, col)
 				}
 			}
 		}

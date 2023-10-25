@@ -50,6 +50,7 @@ func (r *Raft) broadcastAppendEntries() {
 			nextIndex := r.nextIndex[id]
 			prevLogIndex := nextIndex - 1
 			prevLogTerm := -1
+			r.l.Debugf("nextIndexMap[]: %v, nextIndex:%d, r.log[]: %+v", r.nextIndex, nextIndex, r.log)
 			if prevLogIndex >= 0 {
 				prevLogTerm = r.log[prevLogIndex].Term
 			}
