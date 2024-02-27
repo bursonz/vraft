@@ -36,13 +36,19 @@ func (r *Raft) becomeCandidate() {
 	r.term += 1
 	currentTerm := r.term
 	// 投票自己
-	r.vote = r.id
+	r.leader = r.id
 	r.votes = make(map[int]int) // 重置选票桶
 	r.votes[r.id] = currentTerm
-
-	r.lastElectionTime = time.Now()
+	r.checkQuorumVotes()
 
 	// 发送RequestVote
+	if len(r.preOrderedPeers) != 0 {
+		if r.preOrderedPeers[0] == r.id {
+			r.becomeLeader()
+			return
+		}
+	}
+
 	r.l.Infof("正在发送RequestVote")
 	for _, peer := range r.peers {
 		go func(id int) {
@@ -64,14 +70,15 @@ func (r *Raft) becomeCandidate() {
 			r.n.Send(m)
 		}(peer.id)
 	}
+	r.lastElectionTime = time.Now()
 	go r.runElectionTimer()
 }
 
-func (r *Raft) becomeFollower(term int) {
+func (r *Raft) becomeFollower(term int, leader int) {
 	r.l.Debugf("becomes Follower with term=%d; log=%v", term, r.log)
 	r.state = StateFollower
 	r.term = term
-	r.vote = -1
+	r.leader = leader
 	r.votes = make(map[int]int) // 重置选票
 
 	r.lastElectionTime = time.Now()
@@ -80,6 +87,7 @@ func (r *Raft) becomeFollower(term int) {
 
 func (r *Raft) becomeLeader() {
 	r.state = StateLeader
+	r.leader = r.id
 	r.votes = make(map[int]int) // 重置选票
 
 	for _, peer := range r.peers {
@@ -91,6 +99,7 @@ func (r *Raft) becomeLeader() {
 
 	// 每50ms 发送心跳消息， 若有消息发送就重置
 	go func(heartbeatElapse time.Duration) {
+		r.preOrder()               // 放在这里是为了在空闲时候进行统计，也能确保目前的节点Log都已经稳定
 		r.broadcastAppendEntries() // 上台后第一次广播
 
 		t := time.NewTimer(heartbeatElapse)
@@ -101,6 +110,13 @@ func (r *Raft) becomeLeader() {
 			select {
 			case <-t.C:
 				doSend = true
+				// PreOrder
+				if r.n.vraft {
+					//r.mu.Lock()
+					r.preOrder() // 放在这里是为了在空闲时候进行统计，也能确保目前的节点Log都已经稳定
+					//r.mu.Unlock()
+				}
+
 				t.Stop()
 				t.Reset(heartbeatElapse)
 			case _, ok := <-r.appendEntriesReadyC:

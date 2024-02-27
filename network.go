@@ -214,9 +214,10 @@ func (nn *NodeNetwork) runSendWorker() {
 			//transTime := time.Duration(float64(m.Size*8)/nn.bw.bps()) * time.Millisecond // TODO:需要设置大小  size/rate = duration
 			//TODO:countBytes与sleep的先后可能会影响实验结果
 			//time.Sleep(transTime)       // 模拟传输延迟
-			nn.lastCountBytes += m.Size // 记录传输流量
-			nn.net.send(m)              //
+			nn.lastCountBytes += len(m.ToBytes()) // 记录传输流量
 			nn.mu.Unlock()
+			go nn.net.send(m) //
+
 		case <-nn.doneC:
 			return
 		}
@@ -283,6 +284,31 @@ func NewBandwidth(bits float64, ms float64, u ...float64) Bandwidth {
 		bits: bits,
 		ms:   ms,
 		unit: unit,
+	}
+}
+
+func NewBandwidthWithMbps(bw float64, u ...float64) Bandwidth {
+	// 检查换算单位
+	unit := float64(1000)
+	if len(u) != 0 {
+		unit = u[0]
+	}
+	return Bandwidth{
+		bits: bw * unit * unit, // 1Mb = 1 * unit * unit bit
+		ms:   1000,             // per second
+		unit: unit,             // 1000
+	}
+}
+func NewBW(bw float64, u ...float64) Bandwidth {
+	// 检查换算单位
+	unit := float64(1000)
+	if len(u) != 0 {
+		unit = u[0]
+	}
+	return Bandwidth{
+		bits: bw * unit * unit, // 1Mb = 1 * unit * unit bit
+		ms:   1000,             // per second
+		unit: unit,             // 1000
 	}
 }
 

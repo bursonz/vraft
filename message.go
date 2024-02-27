@@ -55,8 +55,8 @@ type Message struct {
 	//RejectHint int  // 消息提示
 
 	// VRaft
-	Size int // 单位是byte,表示整个message的大小
-	//PreOrderedPeers []int // 更新预排序序列, index == index, value == peerId
+	Size            int   // 单位是byte,表示整个message的大小
+	PreOrderedPeers []int // 更新预排序序列, index == index, value == peerId
 	//ForwardPeers    []uint64 // 要转发给的节点, index == index, value == peerId
 	//ForwardIndexes  []uint64 // 转发的起始 Index
 
@@ -78,8 +78,8 @@ func (m *Message) clone() Message {
 		Entries:     m.Entries[:],
 		Reject:      m.Reject,
 		//RejectHint:  m.RejectHint,
-		Size: m.Size,
-		//PreOrderedPeers: m.PreOrderedPeers[:],
+		Size:            m.Size,
+		PreOrderedPeers: m.PreOrderedPeers[:],
 		//ForwardMessages: m.ForwardMessages[:],
 	}
 	return newMsg

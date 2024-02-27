@@ -7,6 +7,10 @@ import (
 
 // 150-300ms
 func (r *Raft) getElectionTimeout() time.Duration {
+	if r.electionTimeout.Seconds() == 0 {
+		r.electionTimeout = time.Duration(150+rand.Intn(150)) * time.Millisecond
+	}
+	//return r.electionTimeout
 	return time.Duration(150+rand.Intn(150)) * time.Millisecond
 }
 
@@ -42,6 +46,15 @@ func (r *Raft) runElectionTimer() {
 		// 超时选举 - 变为candidate - 发起选举
 		if elapsed := time.Since(r.lastElectionTime); elapsed >= timeoutDuration {
 			r.l.Infof("选举超时")
+			if r.requestBiasVote() {
+				r.l.Infof("超时，发送BiasVote")
+				// 如果回复成功，则重置定时，再等一个回合
+				r.lastElectionTime = time.Now()
+				// 缩短等待不是一件好事
+				//timeoutDuration = time.Duration(150) * time.Millisecond
+				r.mu.Unlock()
+				continue
+			}
 			r.becomeCandidate()
 			r.mu.Unlock()
 			return

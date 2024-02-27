@@ -49,6 +49,10 @@ type Cluster struct {
 	n  int        // node number of this cluster
 	t  *testing.T // test signature
 	mu sync.Mutex
+
+	// VRaft
+	vraft     bool
+	criterias []bool
 }
 
 func NewCluster(t *testing.T, peers map[int]Peer, delay time.Duration) *Cluster {
@@ -83,6 +87,77 @@ func NewCluster(t *testing.T, peers map[int]Peer, delay time.Duration) *Cluster 
 		nodes[peer.id] = NewNode(peer.id, nodePeers, storage[peer.id],
 			net.NewNodeNetwork(peer.id),
 			readyC, commitChans[peer.id])
+		nodes[peer.id].Run()
+	}
+
+	// Connect all peers to each other.
+	for _, node := range nodes {
+		for _, peer := range peers {
+			if peer.id != node.id {
+				node.ConnectPeer(peer)
+			}
+		}
+
+		connected[node.id] = true
+	}
+	close(readyC)
+
+	c := &Cluster{
+		nodes:       nodes,
+		nodeList:    nodeList,
+		storage:     storage,
+		network:     net,
+		peers:       peers,
+		commitChans: commitChans,
+		commits:     commits,
+		connected:   connected,
+		alive:       alive,
+		n:           n,
+		t:           t,
+	}
+
+	c.l = NewDefaultLogger("[TEST] ")
+
+	// 收集日志
+	for _, p := range c.nodeList {
+		go c.collectCommits(p)
+	}
+	return c
+}
+
+func NewVRaftCluster(t *testing.T, peers map[int]Peer, delay time.Duration, criterias []bool) *Cluster {
+	n := len(peers)
+	nodes := make(map[int]*Node, n)
+	storage := make(map[int]*MapStorage, n)
+	connected := make(map[int]bool, n)
+	alive := make(map[int]bool, n)
+	commitChans := make(map[int]chan CommitEntry, n)
+	commits := make(map[int][]CommitEntry, n)
+	readyC := make(chan interface{})
+
+	net := NewNetwork(peers, delay)
+
+	nodeList := make([]int, n)
+
+	// Create all Nodes in this cluster
+	for i, peer := range peers {
+		nodeList[i] = peer.id
+
+		nodePeers := make(map[int]Peer)
+		for _, p := range peers {
+			if p.id != peer.id {
+				nodePeers[p.id] = p
+			}
+		}
+
+		storage[peer.id] = NewMapStorage()
+		commitChans[peer.id] = make(chan CommitEntry)
+		alive[peer.id] = true
+
+		nodes[peer.id] = NewVRaftNode(peer.id, nodePeers, storage[peer.id],
+			net.NewNodeNetwork(peer.id),
+			readyC, commitChans[peer.id],
+			criterias)
 		nodes[peer.id].Run()
 	}
 
@@ -189,9 +264,10 @@ func (c *Cluster) RestartPeer(id int) {
 		}
 	}
 	ready := make(chan interface{})
-	c.nodes[id] = NewNode(id, peers, c.storage[id],
+	c.nodes[id] = NewVRaftNode(id, peers, c.storage[id],
 		c.network.NewNodeNetwork(id),
-		ready, c.commitChans[id])
+		ready, c.commitChans[id],
+		c.criterias)
 	c.nodes[id].Run()
 	c.ReconnectPeer(id)
 	close(ready)
@@ -386,4 +462,10 @@ func (c *Cluster) collectCommits(id int) {
 		c.commits[id] = append(c.commits[id], commitEntry)
 		c.mu.Unlock()
 	}
+}
+
+func (c *Cluster) CheckProOrderList() []int {
+	leader, _ := c.CheckSingleLeader()
+	c.nodes[leader].r.preOrder()
+	return c.nodes[leader].r.preOrderedPeers
 }

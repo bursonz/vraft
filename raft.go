@@ -58,21 +58,20 @@ type Raft struct {
 	peers map[int]Peer
 
 	// VRaft
-	vraft           bool
 	preOrderedPeers []int
 	viceLeaders     int // 个数
 
 	// Persistent raft state on all servers
-	term int // current term
-	vote int // last voted id
-	log  []Entry
+	term   int // current term
+	leader int // last voted id
+	log    []Entry
 
 	// Volatile raft state on all servers
 	state            StateType
 	lastElectionTime time.Time
-	currentIndex     int // currentIndex == len(r.log)  不必要的字段
-	commitIndex      int // 已提交的日志做因 达成共识的索引 applyIndex <= commitIndex <= currentIndex
-	applyIndex       int // 最后应用日志索引 <= commitIndex
+	currentIndex     int // 已追加的日志索引 currentIndex == len(r.log)  不必要的字段 可以从entry[]算出来
+	commitIndex      int // 已提交的日志索引 达成共识的索引 applyIndex <= commitIndex <= currentIndex
+	applyIndex       int // 已应用的日志索引 <= commitIndex
 
 	// Volatile raft state on candidate
 	votes map[int]int // key == peerId, value == votedTerm
@@ -86,6 +85,8 @@ type Raft struct {
 	newCommitReadyC     chan struct{}
 	appendEntriesReadyC chan struct{}
 
+	electionTimeout time.Duration
+
 	n  *Node   // node 运行 Raft 算法, 并处理 Message 的收、发、应用
 	s  Storage // storage is used to persist state
 	l  *DefaultLogger
@@ -98,7 +99,7 @@ func NewRaft(id int, peers map[int]Peer, n *Node, s Storage,
 	r := &Raft{
 		id:                  id,
 		peers:               peers,
-		vote:                -1,
+		leader:              -1,
 		currentIndex:        -1,
 		commitIndex:         -1,
 		applyIndex:          -1,

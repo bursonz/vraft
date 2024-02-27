@@ -1,0 +1,43 @@
+@startuml
+
+title Raft_RequestVote
+
+participant "Node-0" as n0
+participant "Node-1" as n1
+participant "Node-2" as n2
+participant "Node-3" as n3
+participant "Node-4" as n4
+
+autonumber
+
+n0->n0: Election Timeout
+activate n0
+n0-->n0: Become Candidate
+
+n0->n1: Msg RequestVote
+activate n1
+n0->n2: Msg RequestVote
+activate n1
+n0->n3: Msg RequestVote
+activate n1
+n0->n4: Msg RequestVote
+activate n1
+
+n0-->n0: Checking Votes
+
+n4-->n4: Check id
+
+n1-->n0: Msg RequestVoteReply
+deactivate n1
+n2-->n0: Msg RequestVoteReply
+deactivate n2
+n3-->n0: Msg RequestVoteReply
+deactivate n3
+n4-->n0: Msg RequestVoteReply
+deactivate n4
+
+n0-->n0: votes >= nodes / 2 +1
+n0-->n0: Become Leader
+deactivate n0
+
+@enduml

@@ -16,8 +16,8 @@ type Peer struct {
 	RAM float64
 	ROM float64
 	// Reliability Assessment 可靠性
-	FR   float64 // Failure Rate - lower is better
-	MTBF float64 // 平均故障间隔时间 Mean Time Between Failure - higher is better
+	//FR   float64 // Failure Rate - lower is better
+	//MTBF float64 // 平均故障间隔时间 Mean Time Between Failure - higher is better
 	// MTBF = MTTF + MTTR
 	MTTR float64 // 平均恢复前时间 Mean Time Between Repair - lower is better
 	MTTF float64 // 平均失效前时间 Mean Time To Failure - higher is better
@@ -38,6 +38,9 @@ func (p *Peer) getMetrics() []float64 {
 		p.MTTR,
 		p.MTTF,
 	}
+}
+func (p *Peer) getCriteria() []bool {
+	return []bool{true, false, true, true, true, false, true}
 }
 
 type NodeInterface interface {
@@ -60,6 +63,9 @@ type Node struct {
 	// Network Configuration
 	net *NodeNetwork
 
+	// VRaft
+	vraft     bool
+	criterias []bool
 	// 引用实例
 	r *Raft
 	s Storage
@@ -76,7 +82,6 @@ type Node struct {
 }
 
 func NewNode(id int, peers map[int]Peer, storage Storage, network *NodeNetwork,
-
 	readyC <-chan interface{},
 	commitC chan<- CommitEntry) *Node {
 	n := &Node{
@@ -86,13 +91,32 @@ func NewNode(id int, peers map[int]Peer, storage Storage, network *NodeNetwork,
 		s:       storage,
 		commitC: commitC,
 		readyC:  readyC,
+		vraft:   false,
 		quitC:   make(chan interface{}),
 	}
 	n.l = NewDefaultLogger("[Node-" + strconv.Itoa(id) + " ]")
 	n.l.Debugf("len Peers: %d", len(peers))
 	return n
 }
-
+func NewVRaftNode(id int, peers map[int]Peer, storage Storage, network *NodeNetwork,
+	readyC <-chan interface{},
+	commitC chan<- CommitEntry,
+	criterias []bool) *Node {
+	n := &Node{
+		id:        id,
+		peers:     peers,
+		net:       network,
+		s:         storage,
+		commitC:   commitC,
+		readyC:    readyC,
+		vraft:     true, // Vraft
+		quitC:     make(chan interface{}),
+		criterias: criterias,
+	}
+	n.l = NewDefaultLogger("[Node-" + strconv.Itoa(id) + " ]")
+	n.l.Debugf("len Peers: %d", len(peers))
+	return n
+}
 func (n *Node) Run() {
 	n.mu.Lock()
 	n.r = NewRaft(n.id, n.peers, n, n.s, n.readyC, n.commitC)

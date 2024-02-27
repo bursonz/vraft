@@ -40,10 +40,10 @@ func genCluster(t *testing.T, n int) *Cluster {
 			CPU:        100,
 			RAM:        100,
 			ROM:        100,
-			FR:         100,
-			MTBF:       10000,
-			MTTR:       10000,
-			MTTF:       10000,
+			//FR:         100,
+			//MTBF:       10000,
+			MTTR: 10000,
+			MTTF: 10000,
 		}
 		peersMap[peer.id] = peer
 	}

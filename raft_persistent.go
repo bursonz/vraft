@@ -35,7 +35,7 @@ func (r *Raft) restoreFromStorage() {
 	}
 	if votedData, found := r.s.Get("votedFor"); found {
 		d := gob.NewDecoder(bytes.NewBuffer(votedData))
-		if err := d.Decode(&r.vote); err != nil {
+		if err := d.Decode(&r.leader); err != nil {
 			r.l.Errorf("%v", err)
 		}
 	} else {
@@ -60,7 +60,7 @@ func (r *Raft) persistToStorage() {
 	r.s.Set("currentTerm", termData.Bytes())
 
 	var votedData bytes.Buffer
-	if err := gob.NewEncoder(&votedData).Encode(r.vote); err != nil {
+	if err := gob.NewEncoder(&votedData).Encode(r.leader); err != nil {
 		r.l.Errorf("%v", err)
 	}
 	r.s.Set("votedFor", votedData.Bytes())

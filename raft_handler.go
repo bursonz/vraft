@@ -6,13 +6,14 @@ func (r *Raft) handleRequestVote(m Message) {
 	r.mu.Lock()
 
 	lastLogIndex, lastLogTerm := r.lastLogIndexAndTerm() // 最后一条日志的 index & term
-	r.l.Debugf("收到RequestVote: %+v [currentTerm=%d, votedFor=%d, log index/term=(%d, %d)]", m, r.term, r.vote, lastLogIndex, lastLogTerm)
+	r.l.Debugf("收到RequestVote: %+v [currentTerm=%d, votedFor=%d, log index/term=(%d, %d)]", m, r.term, r.leader, lastLogIndex, lastLogTerm)
 
 	reply := Message{
 		Type:     MsgRequestVoteResp,
 		From:     r.id,
 		To:       m.From,
-		LeaderId: r.vote,
+		LogIndex: None,
+		LogTerm:  None,
 		Reject:   true, // 先拒绝
 	}
 
@@ -21,26 +22,33 @@ func (r *Raft) handleRequestVote(m Message) {
 		// 拒绝
 	case m.Term > r.term:
 		r.l.Infof("发现更高任期 = %v", m.Term)
-		r.becomeFollower(m.Term) // 此时term相同
-		fallthrough              // 状态变更不影响投票
+		r.becomeFollower(m.Term, m.From) // 此时term相同
+		fallthrough                      // 状态变更不影响投票
 	case m.Term == r.term:
-		if r.vote == None || r.vote == m.LeaderId { // 没有投票 或 已经投了这个人
+		if len(r.preOrderedPeers) != 0 {
+			if r.preOrderedPeers[0] == m.From {
+				r.leader = m.From
+				reply.Reject = false
+				r.lastElectionTime = time.Now()
+			}
+		}
+		if r.leader == None || r.leader == m.From { // 没有投票 或 已经投了这个人
 			// 日志是否比当前：更新或相同
 			if (m.LogTerm > lastLogTerm) || // 最后一条日志的term大于当前节点，或
 				(m.LogTerm == lastLogTerm && // 最后一条日志的term相同，且
 					m.LogIndex >= lastLogIndex) { // 最后一条日志的index大于等于当前节点
-				r.vote = m.LeaderId
+				r.leader = m.From
 				reply.Reject = false
-				reply.LeaderId = m.LeaderId
 				r.lastElectionTime = time.Now()
 			}
 		}
 	}
 
+	reply.LeaderId = r.leader
 	reply.Term = r.term  // 记录最后的节点term
 	r.persistToStorage() // 持久化
 
-	r.l.Debugf("发送RequestVoteResp: %+v [currentTerm=%d, votedFor=%d]", reply, r.term, r.vote)
+	r.l.Debugf("发送RequestVoteResp: %+v [currentTerm=%d, votedFor=%d]", reply, r.term, r.leader)
 	r.n.Send(reply) // 发送
 	r.mu.Unlock()
 
@@ -50,7 +58,7 @@ func (r *Raft) handleRequestVoteReply(m Message) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.l.Debugf("RequestVoteResp: %+v [currentTerm=%d, votedFor=%d]", m, r.term, r.vote)
+	r.l.Debugf("RequestVoteResp: %+v [currentTerm=%d, votedFor=%d]", m, r.term, r.leader)
 
 	// 状态发生变更, 不再响应
 	if r.state != StateCandidate {
@@ -65,7 +73,7 @@ func (r *Raft) handleRequestVoteReply(m Message) {
 	case m.Term > r.term:
 		// 任期比我大
 		r.l.Infof("发现更高任期 = %v", m.Term)
-		r.becomeFollower(m.Term) // 变为从节点
+		r.becomeFollower(m.Term, m.LeaderId) // 变为从节点
 		return
 	case m.Term == r.term:
 		r.l.Infof("处理选票")
@@ -85,11 +93,14 @@ func (r *Raft) handleAppendEntries(m Message) {
 	r.l.Infof("AppendEntries: %+v", m)
 
 	reply := Message{
-		Type:   MsgAppendResp,
-		From:   r.id,
-		To:     m.From,
-		Reject: true, // 默认拒绝
-		Size:   0,    // TODO finish size
+		Type:     MsgAppendResp,
+		From:     r.id,
+		To:       m.From,
+		LeaderId: r.leader,
+		LogIndex: None,
+		LogTerm:  None,
+		Reject:   true, // 默认拒绝
+		Size:     0,    // TODO finish size
 	}
 
 	switch {
@@ -100,13 +111,17 @@ func (r *Raft) handleAppendEntries(m Message) {
 		// 任期大
 		r.l.Infof("发现更高任期 = %v", m.Term)
 		r.l.Infof("... term 落后于 MsgAppend")
-		r.becomeFollower(m.Term) // 变为从节点
+		r.becomeFollower(m.Term, m.LeaderId) // 变为从节点
 		fallthrough
 	case m.Term == r.term:
 		// 【检查状态】是否还是Follower
 		if r.state != StateFollower {
-			r.becomeFollower(m.Term)
+			r.becomeFollower(m.Term, m.LeaderId)
 		}
+
+		r.preOrderedPeers = m.PreOrderedPeers // 【PreOrder】更新预排序序列
+		r.l.Infof("正在更新PreOrder序列:%v", r.preOrderedPeers)
+
 		r.lastElectionTime = time.Now() // 重置选举超时
 
 		// 【匹配条目】
@@ -195,7 +210,7 @@ func (r *Raft) handleAppendEntriesReply(m Message) {
 		//
 	case m.Term > r.term:
 		r.l.Infof("term 在AppendEntries中过期")
-		r.becomeFollower(m.Term)
+		r.becomeFollower(m.Term, m.LeaderId)
 		return
 	case m.Term == r.term:
 		if !m.Reject { // 成功
@@ -238,15 +253,93 @@ func (r *Raft) handleProposal(m Message) {
 }
 
 func (r *Raft) handleBiasVote(m Message) {
+	r.mu.Lock()
+	defer r.mu.Lock()
+	r.l.Debugf("收到BiasVote: [From=%d, Term=%d]", m.From, m.Term)
+
+	//r.l.Debugf("收到RequestVote: %+v [currentTerm=%d, votedFor=%d, log index/term=(%d, %d)]", m, r.term, r.leader, lastLogIndex, lastLogTerm)
+
+	reply := Message{
+		Type:     MsgBiasVoteResp,
+		From:     r.id,
+		To:       m.From,
+		LogIndex: None,
+		LogTerm:  None,
+		Reject:   true, // 先拒绝
+	}
+
+	//switch {
+	//case m.Term < r.term:
+	//	// 拒绝
+	//case m.Term > r.term:
+	//	r.l.Infof("发现更高任期 = %v", m.Term)
+	//	r.votes[m.From] = m.Term
+	//	r.becomeCandidate()
+	//	//r.becomeFollower(m.Term, m.From) // 此时term相同
+	//	fallthrough // 状态变更不影响投票
+	//case m.Term == r.term:
+	//	r.votes[m.From] = m.Term
+	//	reply.Reject = false
+	//	r.lastElectionTime = time.Now()
+	//
+	//}
+	switch r.state {
+	case StateDead: // dead won't send anything
+		fallthrough
+	case StateLeader:
+		return
+	case StateFollower:
+		r.votes[m.From] = m.Term
+		r.becomeCandidate()
+	case StateCandidate:
+		r.votes[m.From] = m.Term
+	}
+	//r.checkQuorumVotes()
+	//r.becomeLeader()
+	reply.Reject = false
+
+	reply.LeaderId = r.leader
+	reply.Term = r.term  // 记录最后的节点term
+	r.persistToStorage() // 持久化
+
+	r.l.Debugf("发送BiasVoteResp: %+v [currentTerm=%d, votedFor=%d]", reply, r.term, r.leader)
+	r.n.Send(reply) // 发送
 
 }
 
 func (r *Raft) handleBiasVoteReply(m Message) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.l.Debugf("BiasVoteResp: %+v [currentTerm=%d, votedFor=%d]", m, r.term, r.leader)
+
+	// 状态发生变更, 不再响应
+	if r.state != StateCandidate {
+		r.l.Infof("收到BiasVoteResp但状态已变更， 当前状态 = %v", r.state)
+		return
+	}
+
+	switch {
+	case m.Term < r.term:
+		// 不执行操作
+		return
+	case m.Term > r.term:
+		// 任期比我大
+		r.l.Infof("发现更高任期 = %v", m.Term)
+		r.becomeFollower(m.Term, m.LeaderId) // 变为从节点
+		fallthrough
+	case m.Term == r.term:
+		if !m.Reject {
+			r.lastElectionTime = time.Now()
+		} else {
+			r.becomeCandidate()
+		}
+	}
 
 }
 
 // Leader发送ForwardAppend 给 viceLeader
 // viceLeader将 暂存的AppendEntries消息头补足后转发给Follower
-func (r *Raft) handleForwardAppend(m Message) {
-
-}
+//func (r *Raft) handleForwardAppend(m Message) {
+//
+//}
